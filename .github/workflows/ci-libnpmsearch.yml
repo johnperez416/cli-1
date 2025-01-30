@@ -5,14 +5,12 @@ name: CI - libnpmsearch
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - '*'
     paths:
       - workspaces/libnpmsearch/**
   push:
     branches:
-      - main
       - latest
+      - release/v*
     paths:
       - workspaces/libnpmsearch/**
   schedule:
@@ -21,72 +19,101 @@ on:
 
 jobs:
   lint:
+    name: Lint
+    if: github.repository_owner == 'npm'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup git user
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Git User
         run: |
           git config --global user.email "npm-cli+bot@github.com"
           git config --global user.name "npm CLI robot"
-      - uses: actions/setup-node@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        id: node
         with:
-          node-version: 18.x
-      - name: Update npm to latest
-        run: npm i --prefer-online --no-fund --no-audit -g npm@latest
-      - run: npm -v
-      - run: npm i --ignore-scripts --no-audit --no-fund
-      - run: npm run lint -w libnpmsearch
+          node-version: 22.x
+          check-latest: contains('22.x', '.x')
+          cache: npm
+      - name: Install Latest npm
+        uses: ./.github/actions/install-latest-npm
+        with:
+          node: ${{ steps.node.outputs.node-version }}
+      - name: Check Git Status
+        run: node scripts/git-dirty.js
+      - name: Reset Deps
+        run: node scripts/resetdeps.js
+      - name: Lint
+        run: npm run lint --ignore-scripts -w libnpmsearch
+      - name: Post Lint
+        run: npm run postlint --ignore-scripts -w libnpmsearch
 
   test:
+    name: Test - ${{ matrix.platform.name }} - ${{ matrix.node-version }}
+    if: github.repository_owner == 'npm'
     strategy:
       fail-fast: false
       matrix:
-        node-version:
-          - 14.17.0
-          - 14.x
-          - 16.13.0
-          - 16.x
-          - 18.0.0
-          - 18.x
         platform:
-          - os: ubuntu-latest
+          - name: Linux
+            os: ubuntu-latest
             shell: bash
-          - os: macos-latest
+          - name: macOS
+            os: macos-latest
             shell: bash
-          - os: windows-latest
+          - name: macOS
+            os: macos-13
+            shell: bash
+          - name: Windows
+            os: windows-latest
             shell: cmd
+        node-version:
+          - 20.17.0
+          - 20.x
+          - 22.9.0
+          - 22.x
+        exclude:
+          - platform: { name: macOS, os: macos-13, shell: bash }
+            node-version: 20.17.0
+          - platform: { name: macOS, os: macos-13, shell: bash }
+            node-version: 20.x
+          - platform: { name: macOS, os: macos-13, shell: bash }
+            node-version: 22.9.0
+          - platform: { name: macOS, os: macos-13, shell: bash }
+            node-version: 22.x
     runs-on: ${{ matrix.platform.os }}
     defaults:
       run:
         shell: ${{ matrix.platform.shell }}
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup git user
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Git User
         run: |
           git config --global user.email "npm-cli+bot@github.com"
           git config --global user.name "npm CLI robot"
-      - uses: actions/setup-node@v3
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        id: node
         with:
           node-version: ${{ matrix.node-version }}
-      - name: Update to workable npm (windows)
-        # node 12 and 14 ship with npm@6, which is known to fail when updating itself in windows
-        if: matrix.platform.os == 'windows-latest' && (startsWith(matrix.node-version, '12.') || startsWith(matrix.node-version, '14.'))
-        run: |
-          curl -sO https://registry.npmjs.org/npm/-/npm-7.5.4.tgz
-          tar xf npm-7.5.4.tgz
-          cd package
-          node lib/npm.js install --no-fund --no-audit -g ..\npm-7.5.4.tgz
-          cd ..
-          rmdir /s /q package
-      - name: Update npm to 7
-        # If we do test on npm 10 it needs npm7
-        if: startsWith(matrix.node-version, '10.')
-        run: npm i --prefer-online --no-fund --no-audit -g npm@7
-      - name: Update npm to latest
-        if: ${{ !startsWith(matrix.node-version, '10.') }}
-        run: npm i --prefer-online --no-fund --no-audit -g npm@latest
-      - run: npm -v
-      - run: npm i --ignore-scripts --no-audit --no-fund
-      - name: add tap problem matcher
+          check-latest: contains(matrix.node-version, '.x')
+          cache: npm
+      - name: Install Latest npm
+        uses: ./.github/actions/install-latest-npm
+        with:
+          node: ${{ steps.node.outputs.node-version }}
+      - name: Check Git Status
+        run: node scripts/git-dirty.js
+      - name: Reset Deps
+        run: node scripts/resetdeps.js
+      - name: Add Problem Matcher
         run: echo "::add-matcher::.github/matchers/tap.json"
-      - run: npm test --ignore-scripts -w libnpmsearch
+      - name: Test
+        run: npm test --ignore-scripts -w libnpmsearch
+      - name: Check Git Status
+        run: node scripts/git-dirty.js
